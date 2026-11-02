@@ -1,22 +1,49 @@
 
-import requests
 import json
+import requests
 
-# Read sample dependencies
-with open("requirments.txt", "r") as file:
+from remediation import extract_fixed_versions
+
+
+# Read the dependency file
+DEPENDENCY_FILE = "requirments.txt"
+
+with open(DEPENDENCY_FILE, "r") as file:
     dependencies = file.readlines()
 
-# Scan each package
-# Store results for all scanned dependencies
 scan_results = []
 
+severity_scores = {
+    "CRITICAL": 10,
+    "HIGH": 7,
+    "MODERATE": 4,
+    "MEDIUM": 4,
+    "LOW": 1
+}
+
+severity_rank = {
+    "CRITICAL": 4,
+    "HIGH": 3,
+    "MODERATE": 2,
+    "MEDIUM": 2,
+    "LOW": 1
+}
+
+
+# Scan every dependency
 for dependency in dependencies:
     dependency = dependency.strip()
+
+    if not dependency or dependency.startswith("#"):
+        continue
 
     if "==" not in dependency:
         continue
 
-    package_name, version = dependency.split("==", 1)
+    package_name, version = [
+        part.strip()
+        for part in dependency.split("==", 1)
+    ]
 
     print(f"\nScanning {package_name} version {version}")
 
@@ -38,36 +65,67 @@ for dependency in dependencies:
         response.raise_for_status()
         vulnerabilities = response.json().get("vulns", [])
 
-        # Group vulnerabilities by CVE
         unique_vulnerabilities = {}
 
-        for vuln in vulnerabilities:
-            aliases = vuln.get("aliases", [])
-            cves = sorted(
-                alias for alias in aliases
+        # Group records with matching CVE identifiers
+        for vulnerability in vulnerabilities:
+            aliases = vulnerability.get("aliases", [])
+
+            cve_ids = sorted(
+                alias for alias in [vulnerability.get("id", "")] + aliases
                 if alias.startswith("CVE-")
             )
 
-            key = tuple(cves) if cves else vuln["id"]
+            key = tuple(cve_ids) if cve_ids else vulnerability["id"]
 
             if key not in unique_vulnerabilities:
                 unique_vulnerabilities[key] = {
-                    "cve": ", ".join(cves) or "Not available",
+                    "id": vulnerability["id"],
+                    "cve": ", ".join(cve_ids) or "Not available",
                     "description": "Not available",
-                    "severity": "Not available"
+                    "severity": "Not available",
+                    "fixed_versions": set()
                 }
 
             record = unique_vulnerabilities[key]
 
-            if vuln.get("summary"):
-                record["description"] = vuln["summary"]
+            # Keep an available description
+            summary = vulnerability.get("summary")
 
-            severity = vuln.get(
+            if summary and record["description"] == "Not available":
+                record["description"] = summary
+
+            # Keep the highest available severity label
+            severity = vulnerability.get(
                 "database_specific", {}
-            ).get("severity")
+            ).get("severity", "")
 
-            if severity:
+            severity = str(severity).upper()
+
+            current = record["severity"].upper()
+
+            if severity_rank.get(severity, 0) > severity_rank.get(current, 0):
                 record["severity"] = severity
+
+            # Use Rehnuma's remediation module
+            fixes = extract_fixed_versions(
+                vulnerability,
+                package_name
+            )
+
+            record["fixed_versions"].update(fixes)
+
+        # Preliminary risk scoring
+        scores = []
+
+        for record in unique_vulnerabilities.values():
+            severity = record["severity"].upper()
+            score = severity_scores.get(severity)
+
+            if score is not None:
+                scores.append(score)
+
+        package_score = max(scores) if scores else None
 
         print(f"OSV records: {len(vulnerabilities)}")
         print(
@@ -75,44 +133,18 @@ for dependency in dependencies:
             f"{len(unique_vulnerabilities)}"
         )
 
-        # Step 6: Calculate preliminary risk scores
-        severity_scores = {
-            "CRITICAL": 10,
-            "HIGH": 7,
-            "MODERATE": 4,
-            "MEDIUM": 4,
-            "LOW": 1
-        }
-
-        risk_scores = []
-
-        for record in unique_vulnerabilities.values():
-            severity = record["severity"].upper()
-
-            score = severity_scores.get(severity)
-
-            if score is not None:
-                risk_scores.append(score)
-
-        # Highest severity determines the initial package score
-        if risk_scores:
-            package_score = max(risk_scores)
-        else:
-            package_score = None
-
         print("\n========== PACKAGE RISK SUMMARY ==========")
         print(f"Package: {package_name}")
         print(f"Version: {version}")
-        print(f"Unique vulnerability groups: {len(unique_vulnerabilities)}")
 
         if package_score is None:
-            print("Risk score: Not rated")
+            print("Preliminary risk score: Not rated")
         else:
             print(f"Preliminary risk score: {package_score}/10")
 
         print("==========================================")
 
-        # Step 7: Save structured package results
+        # Prepare JSON output
         package_result = {
             "package": package_name,
             "version": version,
@@ -123,27 +155,30 @@ for dependency in dependencies:
         }
 
         for record in unique_vulnerabilities.values():
+            fixed_versions = sorted(record["fixed_versions"])
+
             package_result["vulnerabilities"].append({
+                "id": record["id"],
                 "cve": record["cve"],
                 "description": record["description"],
-                "severity": record["severity"]
+                "severity": record["severity"],
+                "reported_fixed_versions": fixed_versions
             })
 
-        scan_results.append(package_result)
-
-        for record in unique_vulnerabilities.values():
             print(f"\nCVE: {record['cve']}")
             print(f"Description: {record['description']}")
             print(f"Severity: {record['severity']}")
-            print("-" * 40)
+            print(f"Reported fixed versions: {fixed_versions}")
+            print("-" * 45)
 
-    except requests.RequestException as error:
+        scan_results.append(package_result)
+
+    except (requests.RequestException, ValueError) as error:
         print(f"API request failed: {error}")
 
 
-# Step 8: Export all scan results to JSON
+# Export scan results
 with open("scan_results.json", "w") as file:
     json.dump(scan_results, file, indent=4)
 
 print("\nScan results saved to scan_results.json")
-
