@@ -2,14 +2,19 @@
 import json
 import requests
 
-from remediation import extract_fixed_versions
+from packaging.version import Version
+from remediation import extract_fixed_versions, recommend_upgrade
+from risk_scoring import calculate_risk_score
 
+# --------------------------------------------------
+# CONFIGURATION
+# --------------------------------------------------
 
-# Read the dependency file
 DEPENDENCY_FILE = "requirments.txt"
+OUTPUT_FILE = "scan_results.json"
 
-with open(DEPENDENCY_FILE, "r") as file:
-    dependencies = file.readlines()
+# Set this to the Python version your application targets.
+TARGET_PYTHON_VERSION = "3.13"
 
 scan_results = []
 
@@ -30,8 +35,20 @@ severity_rank = {
 }
 
 
-# Scan every dependency
+# --------------------------------------------------
+# READ DEPENDENCIES
+# --------------------------------------------------
+
+with open(DEPENDENCY_FILE, "r") as file:
+    dependencies = file.readlines()
+
+
+# --------------------------------------------------
+# SCAN EACH DEPENDENCY
+# --------------------------------------------------
+
 for dependency in dependencies:
+
     dependency = dependency.strip()
 
     if not dependency or dependency.startswith("#"):
@@ -63,16 +80,19 @@ for dependency in dependencies:
         )
 
         response.raise_for_status()
+
         vulnerabilities = response.json().get("vulns", [])
 
         unique_vulnerabilities = {}
 
-        # Group records with matching CVE identifiers
+        # Group records with matching CVE identifiers.
         for vulnerability in vulnerabilities:
+
             aliases = vulnerability.get("aliases", [])
 
             cve_ids = sorted(
-                alias for alias in [vulnerability.get("id", "")] + aliases
+                alias
+                for alias in [vulnerability.get("id", "")] + aliases
                 if alias.startswith("CVE-")
             )
 
@@ -89,13 +109,13 @@ for dependency in dependencies:
 
             record = unique_vulnerabilities[key]
 
-            # Keep an available description
+            # Keep an available description.
             summary = vulnerability.get("summary")
 
             if summary and record["description"] == "Not available":
                 record["description"] = summary
 
-            # Keep the highest available severity label
+            # Keep the highest available severity label.
             severity = vulnerability.get(
                 "database_specific", {}
             ).get("severity", "")
@@ -107,7 +127,7 @@ for dependency in dependencies:
             if severity_rank.get(severity, 0) > severity_rank.get(current, 0):
                 record["severity"] = severity
 
-            # Use Rehnuma's remediation module
+            # Rehnuma's existing fixed-version extraction.
             fixes = extract_fixed_versions(
                 vulnerability,
                 package_name
@@ -115,17 +135,15 @@ for dependency in dependencies:
 
             record["fixed_versions"].update(fixes)
 
-        # Preliminary risk scoring
-        scores = []
+        # --------------------------------------------------
+        # PRELIMINARY RISK SCORING
+        # --------------------------------------------------
 
-        for record in unique_vulnerabilities.values():
-            severity = record["severity"].upper()
-            score = severity_scores.get(severity)
+            # Improved risk scoring
+        risk_details = calculate_risk_score(unique_vulnerabilities)
+        package_score = risk_details["risk_score"]
+        
 
-            if score is not None:
-                scores.append(score)
-
-        package_score = max(scores) if scores else None
 
         print(f"OSV records: {len(vulnerabilities)}")
         print(
@@ -144,18 +162,27 @@ for dependency in dependencies:
 
         print("==========================================")
 
-        # Prepare JSON output
+        # --------------------------------------------------
+        # PREPARE JSON OUTPUT
+        # --------------------------------------------------
+
         package_result = {
-            "package": package_name,
-            "version": version,
-            "osv_records": len(vulnerabilities),
-            "unique_vulnerability_count": len(unique_vulnerabilities),
-            "risk_score": package_score,
-            "vulnerabilities": []
-        }
+        "package": package_name,
+        "version": version,
+        "osv_records": len(vulnerabilities),
+        "unique_vulnerability_count": len(unique_vulnerabilities),
+        "risk_score": package_score,
+        "risk_details": risk_details,
+        "vulnerabilities": []
+        }   
 
         for record in unique_vulnerabilities.values():
-            fixed_versions = sorted(record["fixed_versions"])
+
+            # Correct numerical version sorting.
+            fixed_versions = sorted(
+                record["fixed_versions"],
+                key=Version
+            )
 
             package_result["vulnerabilities"].append({
                 "id": record["id"],
@@ -171,14 +198,54 @@ for dependency in dependencies:
             print(f"Reported fixed versions: {fixed_versions}")
             print("-" * 45)
 
+        # ==================================================
+        # NEW: PHASE 3 AUTOMATIC UPGRADE RECOMMENDATIONS
+        # ==================================================
+
+        print("\n========== UPGRADE RECOMMENDATION ==========")
+
+        upgrade_result = recommend_upgrade(
+            package_name,
+            version,
+            python_version=TARGET_PYTHON_VERSION,
+            max_candidates=5
+        )
+
+        # Include Phase 3 results in JSON.
+        package_result["upgrade_recommendation"] = upgrade_result
+
+        print(
+            "Upgrade status:",
+            upgrade_result.get("status")
+        )
+
+        print(
+            "Recommended candidate:",
+            upgrade_result.get("recommended_candidate")
+        )
+
+        print(
+            "Target Python:",
+            upgrade_result.get("target_python")
+        )
+
+        if upgrade_result.get("warning"):
+            print("Warning:", upgrade_result["warning"])
+
+        print("============================================")
+
+        # Add complete result for this package.
         scan_results.append(package_result)
 
     except (requests.RequestException, ValueError) as error:
         print(f"API request failed: {error}")
 
 
-# Export scan results
-with open("scan_results.json", "w") as file:
+# --------------------------------------------------
+# EXPORT SCAN RESULTS
+# --------------------------------------------------
+
+with open(OUTPUT_FILE, "w") as file:
     json.dump(scan_results, file, indent=4)
 
-print("\nScan results saved to scan_results.json")
+print(f"\nScan results saved to {OUTPUT_FILE}")
