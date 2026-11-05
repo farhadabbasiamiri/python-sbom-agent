@@ -22,12 +22,26 @@ The system will integrate vulnerability scanning, risk scoring, AI-generated sec
 
 Professor Farhad Abbasi Amiri 
 
+
 ## Current Development Status
 
+### Completed Features
 - Python dependency parsing
 - OSV API vulnerability detection
 - CVE identification and basic deduplication
-- Preliminary risk scoring
-- JSON report generation
+- Improved weighted risk scoring based on:
+  - Vulnerability severity (65%)
+  - Number of vulnerabilities (25%)
+  - Reported fix availability (10%)
+- Fixed-version extraction from OSV
+- Upgrade validation against known vulnerabilities
+- PyPI release verification
+- Automatic upgrade recommendations
+- Basic Python-version compatibility filtering
+- JSON report generation with risk scores and upgrade recommendations
 
-**Planned Features:** Improved risk assessment, upgrade recommendations, AI agent integration, Gradio dashboard, and evaluation.
+### Planned Features
+- AI agent integration
+- Gradio dashboard
+- Comprehensive testing and evaluation
+- Final system integration and documentation
