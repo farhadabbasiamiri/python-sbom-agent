@@ -2,6 +2,7 @@
 import json
 import requests
 
+from backend.ai_agent import analyze_scan_results
 from packaging.version import Version
 from remediation import extract_fixed_versions, recommend_upgrade
 from risk_scoring import calculate_risk_score
@@ -244,6 +245,14 @@ for dependency in dependencies:
 # --------------------------------------------------
 # EXPORT SCAN RESULTS
 # --------------------------------------------------
+
+scan_results = analyze_scan_results(scan_results)
+
+for package_result in scan_results:
+    analysis = package_result["agent_analysis"]
+    print(f"\nAI agent analysis: {analysis['summary']}")
+    for action in analysis["recommended_actions"]:
+        print(f"- {action}")
 
 with open(OUTPUT_FILE, "w") as file:
     json.dump(scan_results, file, indent=4)
