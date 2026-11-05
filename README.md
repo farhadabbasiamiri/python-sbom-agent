@@ -39,9 +39,14 @@ Professor Farhad Abbasi Amiri
 - Automatic upgrade recommendations
 - Basic Python-version compatibility filtering
 - JSON report generation with risk scores and upgrade recommendations
+- Local, explainable agent analysis that prioritizes findings and recommends next steps
 
 ### Planned Features
-- AI agent integration
 - Gradio dashboard
 - Comprehensive testing and evaluation
 - Final system integration and documentation
+
+The agent runs locally over the scanner's JSON results. Its analysis includes
+the evidence-based risk level, severity counts, a short summary, and prioritized
+actions. It does not send dependency or vulnerability data to an external AI
+service.
