@@ -8,8 +8,16 @@ import sys
 import tempfile
 from pathlib import Path
 
+# NEW: Import Rehnuma's local LLM agent
+from backend.llm_agent import run_security_agent
+
+
 PROJECT_DIR = Path(__file__).resolve().parent
 
+
+# ==================================================
+# EXISTING DEPENDENCY SCANNER - UNCHANGED
+# ==================================================
 
 def scan_dependencies(file):
     if file is None:
@@ -128,12 +136,39 @@ def scan_dependencies(file):
         return f"Error: {error}", [], {}, "", None
 
 
+# ==================================================
+# NEW: LOCAL LLM SECURITY ASSISTANT
+# ==================================================
+
+def ask_local_agent(question):
+    print("DEBUG: Button clicked", flush=True)
+
+    if not question or not question.strip():
+        return "Please enter a security question."
+
+    try:
+        print("DEBUG: Starting Ollama agent", flush=True)
+
+        answer = run_security_agent(question)
+
+        print("DEBUG: Ollama agent finished", flush=True)
+
+        return answer or "The AI agent returned an empty response."
+
+    except Exception as error:
+        print(f"DEBUG: Agent error: {error}", flush=True)
+        return f"AI agent error: {error}"
+# ==================================================
+# GRADIO DASHBOARD
+# ==================================================
+
 with gr.Blocks(
     title="Python Dependency SBOM Risk Agent"
 ) as demo:
 
     gr.Markdown("# Python Dependency SBOM Risk Agent")
     gr.Markdown("### Group 10A | Laurentian University")
+
     gr.Markdown(
         "Upload a Python dependency file to scan for known "
         "security vulnerabilities using the OSV database."
@@ -170,13 +205,53 @@ with gr.Blocks(
         interactive=False
     )
 
+    # Existing detailed vulnerability results
     with gr.Tab("Detailed Vulnerability Results"):
         json_output = gr.JSON(
             label="OSV Scan Results"
         )
 
+    # Existing rule-based security analysis
     with gr.Tab("Security Agent Analysis"):
         agent_output = gr.Markdown()
+
+    # ==================================================
+    # NEW: INTERACTIVE LLM-POWERED SECURITY AGENT
+    # ==================================================
+
+    with gr.Tab("Ask Local AI Agent"):
+
+        gr.Markdown(
+            "Ask the local AI agent about Python package "
+            "vulnerabilities and potential upgrades. "
+            "The agent runs using Ollama on your Mac."
+        )
+
+        question_input = gr.Textbox(
+            label="Your Security Question",
+            placeholder=(
+                "Find a potential upgrade for requests 2.19.0"
+            ),
+            lines=2
+        )
+
+        ask_button = gr.Button(
+            "Ask AI Agent",
+            variant="primary"
+        )
+
+        llm_output = gr.Markdown()
+
+    ask_button.click(
+    fn=ask_local_agent,
+    inputs=[question_input],
+    outputs=[llm_output],
+    show_progress="full"
+)
+
+    # ==================================================
+    # EXISTING REPORT DOWNLOAD
+    # ==================================================
 
     gr.Markdown("## Download Security Report")
 
@@ -185,6 +260,7 @@ with gr.Blocks(
         interactive=False
     )
 
+    # Existing scan button connection
     scan_button.click(
         fn=scan_dependencies,
         inputs=[file_input],
@@ -197,5 +273,7 @@ with gr.Blocks(
         ]
     )
 
+
 if __name__ == "__main__":
-    demo.launch()
+    demo.queue(default_concurrency_limit=1)
+    demo.launch(show_error=True)
